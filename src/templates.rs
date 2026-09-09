@@ -1,6 +1,9 @@
-"""Files written by `otogo init`. The repository is the control plane."""
+//! Files written by `otogo init`. The repository is the control plane.
+//!
+//! Generated from the reference implementation's templates; kept verbatim so
+//! a repo scaffolded by either implementation is byte-identical.
 
-GOAL_MD = """# Goal
+pub const GOAL_MD: &str = r##"# Goal
 
 ## Objective
 <One capability, stated so a person could tell whether it exists.>
@@ -11,17 +14,17 @@ GOAL_MD = """# Goal
 ## Completion condition
 <The observable state that ends the goal. Not "tests pass" — an effect a user
 would notice, provable from the corpus.>
-"""
+"##;
 
-FACTS_MD = """# Facts
+pub const FACTS_MD: &str = r##"# Facts
 
 Decisions later rounds must not rediscover. Append only; each entry dated.
 Do not put speculation here — a fact earns its place by having cost a round.
 
 - <YYYY-MM-DD> <decision, and the evidence that settled it>
-"""
+"##;
 
-PLAN_MD = """# Plan
+pub const PLAN_MD: &str = r##"# Plan
 
 ## Initial floor
 <The deterministic checks that are green today and must stay green.>
@@ -32,9 +35,9 @@ PLAN_MD = """# Plan
 3. <third>
 
 This order is a hypothesis. The driver decides the real one.
-"""
+"##;
 
-LOOP_MD = """# LOOP
+pub const LOOP_MD: &str = r##"# LOOP
 
 The procedure. This file changes when the *process* changes, not after a round.
 
@@ -75,9 +78,9 @@ Stop the round and escalate when:
 - the failure cannot be reproduced or attributed;
 - the repair needs a frozen change;
 - the gap classifies as `world` or `harness` — that is not a product round.
-"""
+"##;
 
-RUBRIC_MD = """# Rubric
+pub const RUBRIC_MD: &str = r##"# Rubric
 
 How a run is judged. FROZEN — the loop cannot edit this.
 
@@ -90,21 +93,21 @@ question exactly as it will be asked.>
 
 A learned judge remains *evidence* until its rankings agree with repeated human
 rankings. Until then it does not decide a round.
-"""
+"##;
 
-README_CORPUS = """# Corpus
+pub const README_CORPUS: &str = r##"# Corpus
 
 Real demand. Each request is a file a person wrote or approved, sent unchanged
 through a fresh interaction. FROZEN — the loop cannot add, edit, or remove one.
 
 One file per request. The filename (without extension) is the request id.
-"""
+"##;
 
-EXAMPLE_REQUEST = """Show me every invoice that went overdue this week and mark
+pub const EXAMPLE_REQUEST: &str = r##"Show me every invoice that went overdue this week and mark
 the two largest as escalated.
-"""
+"##;
 
-PROPOSALS_MD = """# Proposals
+pub const PROPOSALS_MD: &str = r##"# Proposals
 
 Boundary changes the loop wants and a person must decide. Newest last.
-"""
+"##;
