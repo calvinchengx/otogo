@@ -1,11 +1,15 @@
-.PHONY: help install install-skills test smoke clean
+.PHONY: help build install install-skills test fmt lint smoke clean
 
 help: ## Show the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install otogo in editable mode with dev extras
-	pip install -e ".[dev]"
+build: ## Build the release binary
+	cargo build --release
+	@ls -lh target/release/otogo | awk '{print "  binary:", $$5}'
+
+install: ## Install otogo onto PATH
+	cargo install --path .
 
 install-skills: ## Link the otogo skills into a project's .claude/skills (DEST=path)
 	@dest="$${DEST:-.claude/skills}"; mkdir -p "$$dest"; \
@@ -17,12 +21,18 @@ install-skills: ## Link the otogo skills into a project's .claude/skills (DEST=p
 	done
 
 test: ## Run the test suite
-	pytest -q
+	cargo test
+
+fmt: ## Format
+	cargo fmt
+
+lint: ## Clippy, warnings as errors
+	cargo clippy --all-targets -- -D warnings
 
 smoke: ## Scaffold a throwaway loop and open a round against it
-	@rm -rf .scratch/smoke && mkdir -p .scratch/smoke
-	@cd .scratch/smoke && python3 -m otogo init . && python3 -m otogo status
+	@rm -rf scratch/smoke && mkdir -p scratch/smoke
+	@cd scratch/smoke && $(CURDIR)/target/release/otogo init . && $(CURDIR)/target/release/otogo status
 
 clean: ## Remove build and test artifacts
-	rm -rf .scratch dist build *.egg-info .pytest_cache
-	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+	cargo clean
+	rm -rf scratch

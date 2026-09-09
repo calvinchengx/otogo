@@ -170,16 +170,25 @@ and the quality is the kind that erodes without anyone deciding to erode it.
 ## Install
 
 ```bash
-pip install -e .
+cargo install --path .
 otogo init
 ```
 
-Python 3.9+, standard library only. `pytest` for the test suite.
+A single static binary, ~550 KB, three dependencies (`clap`, `serde_json`,
+`sha2`). Globbing, directory walking and timestamps are hand-rolled rather than
+pulling in `regex`, `walkdir` and `chrono` — the binary runs eight or nine times
+per round, so startup cost and size matter more than convenience.
+
+```
+                    per invocation    peak RSS
+  reference impl        264 ms          21.0 MB
+  otogo                  13 ms           1.9 MB
+```
 
 ## The CLI enforces; the skills teach
 
-otogo contains no model. It is argparse, subprocess, and hashlib — the referee,
-not the player. That separation is deliberate: **a skill is advisory and a
+otogo contains no model. It shells out, hashes files, and compares JSON — the
+referee, not the player. That separation is deliberate: **a skill is advisory and a
 subprocess exit code is not.** An agent that decides the corpus is wrong can
 argue its way past an instruction; it cannot argue its way past a hash
 comparison. Authority has to live outside the model's control or it is not

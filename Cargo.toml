@@ -1,0 +1,28 @@
+[package]
+name = "otogo"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Goal loops where the agent owns the turns and a person owns the rounds"
+license = "Apache-2.0"
+authors = ["Calvin Cheng <calvin@calvinx.com>"]
+repository = "https://github.com/calvinchengx/otogo"
+readme = "README.md"
+keywords = ["agents", "evaluation", "harness", "goal-loop", "witnesses"]
+categories = ["command-line-utilities", "development-tools"]
+
+# Kept deliberately small: the binary runs 8-9 times per round on a laptop, so
+# startup cost and size matter more than convenience. Globbing, directory
+# walking and timestamps are hand-rolled rather than pulling in regex, walkdir
+# and chrono.
+[dependencies]
+clap = { version = "4", features = ["std", "derive", "help", "usage", "error-context"], default-features = false }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+
+[profile.release]
+opt-level = "z"     # this workload is I/O bound; size beats vectorization
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
