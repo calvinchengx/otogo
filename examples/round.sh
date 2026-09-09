@@ -10,7 +10,7 @@
 set -uo pipefail
 TS="${TS:-otogo}"
 REQUEST="${1:?usage: round.sh <request-id>}"
-AGENT_MD="$(dirname "$0")/AGENT.md"
+SKILL="$(dirname "$0")/../skills/otogo-round/SKILL.md"
 
 stop() { echo; echo "STOP: $*"; exit 3; }
 
@@ -24,9 +24,15 @@ $TS drive
 $TS score
 
 # 5-7. The agent classifies one gap and closes that whole path.
+#
+# The procedure comes from the skill, not from a copy kept next to this script:
+# a second copy of the rules goes stale silently. `sed` strips the frontmatter.
 claude -p "$($TS brief)
 
-$(cat "$AGENT_MD")" \
+$(sed '1,/^---$/d' "$SKILL")
+
+The round is already open, driven and scored. Do only the classify-and-repair
+steps above. Do not run \`$TS verify\` or \`$TS close\` — this script does that." \
   --allowedTools Bash Read Edit Write Grep Glob \
   --permission-mode acceptEdits
 agent_rc=$?

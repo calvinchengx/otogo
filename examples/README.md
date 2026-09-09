@@ -7,10 +7,10 @@
 
 Both share the same runners:
 
-- [`AGENT.md`](AGENT.md) — the standing instruction handed to the development
-  agent each round. It is the whole prompt; everything else it needs comes from
-  `otogo brief`.
 - [`round.sh`](round.sh) — one autonomous round. Exits `3` on any stop rule.
+  The instruction it hands the development agent is the
+  [`otogo-round`](../skills/otogo-round/) skill itself, read at run time — there
+  is deliberately no second copy of the procedure living here to go stale.
 - [`batch.sh`](batch.sh) — three rounds, then it stops and waits for a person.
 
 ## The scorer's contract

@@ -170,3 +170,21 @@ fn skills_do_not_hardcode_the_authority_list() {
         );
     }
 }
+
+#[test]
+fn the_runner_feeds_the_skill_rather_than_a_copy_of_it() {
+    // examples/round.sh used to carry its own AGENT.md saying the same things.
+    // Two copies of a procedure drift, and the stale one is the one an agent
+    // reads at 3am. The runner reads the skill at run time instead.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runner =
+        std::fs::read_to_string(root.join("examples/round.sh")).expect("examples/round.sh missing");
+    assert!(
+        runner.contains("skills/otogo-round/SKILL.md"),
+        "round.sh must hand the agent the skill, not an inline procedure"
+    );
+    assert!(
+        !root.join("examples/AGENT.md").exists(),
+        "examples/AGENT.md is a second copy of the round procedure; the skill is the one"
+    );
+}
