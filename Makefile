@@ -1,4 +1,4 @@
-.PHONY: help install test smoke clean
+.PHONY: help install install-skills test smoke clean
 
 help: ## Show the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -6,6 +6,15 @@ help: ## Show the available targets
 
 install: ## Install otogo in editable mode with dev extras
 	pip install -e ".[dev]"
+
+install-skills: ## Link the otogo skills into a project's .claude/skills (DEST=path)
+	@dest="$${DEST:-.claude/skills}"; mkdir -p "$$dest"; \
+	for s in skills/*/; do \
+	  name=$$(basename "$$s"); \
+	  rm -rf "$$dest/$$name"; \
+	  ln -s "$$(cd "$$s" && pwd)" "$$dest/$$name"; \
+	  echo "  linked $$dest/$$name"; \
+	done
 
 test: ## Run the test suite
 	pytest -q

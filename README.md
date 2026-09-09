@@ -176,6 +176,32 @@ otogo init
 
 Python 3.9+, standard library only. `pytest` for the test suite.
 
+## The CLI enforces; the skills teach
+
+otogo contains no model. It is argparse, subprocess, and hashlib — the referee,
+not the player. That separation is deliberate: **a skill is advisory and a
+subprocess exit code is not.** An agent that decides the corpus is wrong can
+argue its way past an instruction; it cannot argue its way past a hash
+comparison. Authority has to live outside the model's control or it is not
+authority.
+
+Two skills drive the CLI from a normal agent session:
+
+```bash
+make install-skills                       # into ./.claude/skills
+make install-skills DEST=~/.claude/skills # or globally
+```
+
+| skill | for |
+|---|---|
+| [`otogo-setup`](skills/otogo-setup/) | wiring a loop into a repo — the five commands, what to freeze, the first three requests |
+| [`otogo-round`](skills/otogo-round/) | running one round — drive, classify, close one path, add a rung, stop at the stop rules |
+
+Neither skill restates the authority list. They point the agent at `otogo brief`,
+which reads it from `loop.json` at runtime, because a second copy of the rules
+goes stale silently and a stale authority list is worse than none. A test
+enforces this.
+
 ## Examples
 
 - [`examples/emulator-parity/`](examples/emulator-parity/) — growing emulator
