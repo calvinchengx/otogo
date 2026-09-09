@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "commands": {
+    "reset":  "make clean && make up",
+    "health": "make status",
+    "floor":  "make test",
+    "drive":  "sh harness/drive.sh {request} {out}",
+    "score":  "python3 harness/score.py --round {round_dir} --phase {phase}"
+  },
+  "authority": {
+    "frozen": [
+      "goals/corpus/**",
+      "goals/loop.json",
+      "docs/parity.md",
+      "docs/parity-snapshots/**",
+      "docker-compose.yml"
+    ],
+    "propose": [
+      "go.mod",
+      "Dockerfile",
+      "Makefile",
+      "docs/*.md"
+    ],
+    "free": ["**"]
+  },
+  "measure": {
+    "globs": ["**/*_test.go", "e2e/**", "docs/witnesses.json"],
+    "append_only": true,
+    "json_ledgers": ["docs/witnesses.json"]
+  },
+  "budget": { "rounds_per_batch": 3, "attribution_warn_areas": 3 }
+}

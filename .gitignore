@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# A loop's own evidence is repo state, not build output — do NOT ignore goals/.
+# The one exception is scratch output from local experiments:
+/scratch/
