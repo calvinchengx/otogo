@@ -192,145 +192,166 @@ fn kind(v: &Value) -> &'static str {
     }
 }
 
-pub fn check(l: &GoalLoop, round_dir: &Path) -> Res<Verdict> {
-    let snap_path = round_dir.join("snapshot.json");
-    let raw = fs::read_to_string(&snap_path).map_err(|_| {
-        LoopError(format!(
-            "{} missing — was the round opened?",
-            snap_path.display()
+/// The authority in force for a round, as captured at `open`.
+struct Authority {
+    frozen: GlobSet,
+    propose: GlobSet,
+    measure: GlobSet,
+    ledgers: GlobSet,
+    append_only: bool,
+}
+
+impl Authority {
+    fn from_snapshot(snap: &Value, l: &GoalLoop) -> Self {
+        let cfg = snap.get("config").cloned().unwrap_or_else(
+            || json!({"authority": l.config.get("authority"), "measure": l.config.get("measure")}),
+        );
+        Authority {
+            frozen: GlobSet::from_json(cfg.pointer("/authority/frozen")),
+            propose: GlobSet::from_json(cfg.pointer("/authority/propose")),
+            measure: GlobSet::from_json(cfg.pointer("/measure/globs")),
+            ledgers: GlobSet::from_json(cfg.pointer("/measure/json_ledgers")),
+            append_only: cfg
+                .pointer("/measure/append_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+        }
+    }
+}
+
+/// What the guard decided about one file.
+enum Ruling {
+    Untouched,
+    Violation(String),
+    Proposal(String),
+    Rung(String),
+    FreeChange(String),
+}
+
+impl Verdict {
+    fn record(&mut self, r: Ruling) {
+        match r {
+            Ruling::Untouched => {}
+            Ruling::Violation(m) => self.violations.push(m),
+            Ruling::Proposal(m) => self.proposals.push(m),
+            Ruling::Rung(m) => self.appended_measures.push(m),
+            Ruling::FreeChange(m) => self.changed_free.push(m),
+        }
+    }
+}
+
+/// A measure file that existed at `open` and has changed. Which comparison
+/// applies depends on what kind of evidence it holds.
+fn judge_changed_measure(a: &Authority, rel: &str, path: &Path, round_dir: &Path) -> Ruling {
+    let snapshot_copy = round_dir.join("_snapshot").join(rel);
+    let old_text = fs::read_to_string(&snapshot_copy).unwrap_or_default();
+    let new_text = fs::read_to_string(path).unwrap_or_default();
+
+    if a.ledgers.is_match(rel) {
+        return judge_ledger(rel, &old_text, &new_text);
+    }
+    if !a.append_only {
+        return Ruling::Rung(format!("{rel} (modified)"));
+    }
+    if is_pure_append(&old_text, &new_text) {
+        Ruling::Rung(format!("{rel} (appended)"))
+    } else {
+        Ruling::Violation(format!(
+            "MEASURE weakened: {rel} — existing lines were changed or removed. \
+             Checks are append-only; a round may add a rung, never lower one."
         ))
-    })?;
-    let snap: Value = serde_json::from_str(&raw).map_err(|e| LoopError(e.to_string()))?;
-    let old_hashes = snap.get("hashes").cloned().unwrap_or(Value::Null);
+    }
+}
 
-    // Authority as of `open`, not as it stands now.
-    let cfg = snap.get("config").cloned().unwrap_or_else(
-        || json!({"authority": l.config.get("authority"), "measure": l.config.get("measure")}),
-    );
-    let frozen = GlobSet::from_json(cfg.pointer("/authority/frozen"));
-    let propose = GlobSet::from_json(cfg.pointer("/authority/propose"));
-    let measure = GlobSet::from_json(cfg.pointer("/measure/globs"));
-    let ledgers = GlobSet::from_json(cfg.pointer("/measure/json_ledgers"));
-    let append_only = cfg
-        .pointer("/measure/append_only")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-
-    let mut v = Verdict {
-        violations: vec![],
-        proposals: vec![],
-        warnings: vec![],
-        changed_free: vec![],
-        appended_measures: vec![],
+fn judge_ledger(rel: &str, old_text: &str, new_text: &str) -> Ruling {
+    let (old, new) = match (
+        serde_json::from_str::<Value>(old_text),
+        serde_json::from_str::<Value>(new_text),
+    ) {
+        (Ok(o), Ok(n)) => (o, n),
+        _ => return Ruling::Violation(format!("LEDGER unparseable: {rel}")),
     };
-    let mut seen: Vec<String> = Vec::new();
+    let mut bad = Vec::new();
+    json_only_grew(&old, &new, "$", &mut bad);
+    if bad.is_empty() {
+        return Ruling::Rung(format!("{rel} (ledger grew)"));
+    }
+    let shown: Vec<String> = bad.iter().take(4).cloned().collect();
+    Ruling::Violation(format!(
+        "LEDGER weakened: {rel} — {}{}. Evidence ledgers may gain entries, never lose or \
+         rewrite them.",
+        shown.join("; "),
+        if bad.len() > 4 { "; ..." } else { "" }
+    ))
+}
 
-    for (rel, path) in guarded_files(l, &frozen, &measure) {
-        seen.push(rel.clone());
-        let digest = sha256_file(&path)?;
-        let was = old_hashes.get(&rel).and_then(|h| h.as_str());
-        let changed = was.map(|w| w != digest).unwrap_or(true);
+/// Judge one file that is present on disk now.
+fn judge_present(
+    a: &Authority,
+    rel: &str,
+    path: &Path,
+    round_dir: &Path,
+    was: Option<&str>,
+    digest: &str,
+) -> Ruling {
+    let changed = was.map(|w| w != digest).unwrap_or(true);
 
-        if let Some(pat) = frozen.match_of(&rel) {
-            if changed {
-                let kind = if was.is_none() {
-                    "added to"
-                } else {
-                    "modified"
-                };
-                v.violations.push(format!(
-                    "FROZEN {kind}: {rel} (matches `{pat}`) — this file is part of the exam."
-                ));
-            }
-            continue;
+    if let Some(pat) = a.frozen.match_of(rel) {
+        if !changed {
+            return Ruling::Untouched;
         }
-
-        if measure.is_match(&rel) {
-            if !changed {
-                continue;
-            }
-            if was.is_none() {
-                v.appended_measures.push(format!("{rel} (new check file)"));
-            } else if ledgers.is_match(&rel) {
-                let old_text =
-                    fs::read_to_string(round_dir.join("_snapshot").join(&rel)).unwrap_or_default();
-                let new_text = fs::read_to_string(&path).unwrap_or_default();
-                match (
-                    serde_json::from_str::<Value>(&old_text),
-                    serde_json::from_str::<Value>(&new_text),
-                ) {
-                    (Ok(o), Ok(n)) => {
-                        let mut bad = Vec::new();
-                        json_only_grew(&o, &n, "$", &mut bad);
-                        if bad.is_empty() {
-                            v.appended_measures.push(format!("{rel} (ledger grew)"));
-                        } else {
-                            let shown: Vec<String> = bad.iter().take(4).cloned().collect();
-                            v.violations.push(format!(
-                                "LEDGER weakened: {rel} — {}{}. Evidence ledgers may gain \
-                                 entries, never lose or rewrite them.",
-                                shown.join("; "),
-                                if bad.len() > 4 { "; ..." } else { "" }
-                            ));
-                        }
-                    }
-                    _ => v.violations.push(format!("LEDGER unparseable: {rel}")),
-                }
-            } else if append_only {
-                let old_text =
-                    fs::read_to_string(round_dir.join("_snapshot").join(&rel)).unwrap_or_default();
-                let new_text = fs::read_to_string(&path).unwrap_or_default();
-                if is_pure_append(&old_text, &new_text) {
-                    v.appended_measures.push(format!("{rel} (appended)"));
-                } else {
-                    v.violations.push(format!(
-                        "MEASURE weakened: {rel} — existing lines were changed or removed. \
-                         Checks are append-only; a round may add a rung, never lower one."
-                    ));
-                }
-            } else {
-                v.appended_measures.push(format!("{rel} (modified)"));
-            }
-            continue;
-        }
-
-        if let Some(pat) = propose.match_of(&rel) {
-            if changed {
-                v.proposals.push(format!("{rel} (matches `{pat}`)"));
-            }
-            continue;
-        }
-
-        if changed {
-            v.changed_free.push(rel);
-        }
+        let kind = if was.is_none() {
+            "added to"
+        } else {
+            "modified"
+        };
+        return Ruling::Violation(format!(
+            "FROZEN {kind}: {rel} (matches `{pat}`) — this file is part of the exam."
+        ));
     }
 
-    if let Some(map) = old_hashes.as_object() {
-        for rel in map.keys() {
-            if seen.iter().any(|s| s == rel) {
-                continue;
-            }
-            // Still on disk, just no longer guarded — someone gitignored it
-            // mid-round. That is not a deletion, and reporting it as one would
-            // be a false alarm the operator cannot act on.
-            if l.root.join(rel).exists() {
-                continue;
-            }
-            if frozen.is_match(rel) {
-                v.violations
-                    .push(format!("FROZEN deleted: {rel} — the exam cannot shrink."));
-            } else if measure.is_match(rel) {
-                v.violations
-                    .push(format!("MEASURE deleted: {rel} — checks are append-only."));
-            } else if propose.is_match(rel) {
-                v.proposals.push(format!("{rel} (deleted)"));
-            } else {
-                v.changed_free.push(format!("{rel} (deleted)"));
-            }
-        }
+    if a.measure.is_match(rel) {
+        return match (changed, was.is_none()) {
+            (false, _) => Ruling::Untouched,
+            (true, true) => Ruling::Rung(format!("{rel} (new check file)")),
+            (true, false) => judge_changed_measure(a, rel, path, round_dir),
+        };
     }
 
+    if let Some(pat) = a.propose.match_of(rel) {
+        return match changed {
+            true => Ruling::Proposal(format!("{rel} (matches `{pat}`)")),
+            false => Ruling::Untouched,
+        };
+    }
+
+    match changed {
+        true => Ruling::FreeChange(rel.to_string()),
+        false => Ruling::Untouched,
+    }
+}
+
+/// Judge a path that was hashed at `open` and is no longer being guarded.
+fn judge_absent(a: &Authority, l: &GoalLoop, rel: &str) -> Ruling {
+    // Still on disk, just no longer guarded — someone gitignored it mid-round.
+    // That is not a deletion, and reporting it as one would be a false alarm
+    // the operator cannot act on.
+    if l.root.join(rel).exists() {
+        return Ruling::Untouched;
+    }
+    if a.frozen.is_match(rel) {
+        Ruling::Violation(format!("FROZEN deleted: {rel} — the exam cannot shrink."))
+    } else if a.measure.is_match(rel) {
+        Ruling::Violation(format!("MEASURE deleted: {rel} — checks are append-only."))
+    } else if a.propose.is_match(rel) {
+        Ruling::Proposal(format!("{rel} (deleted)"))
+    } else {
+        Ruling::FreeChange(format!("{rel} (deleted)"))
+    }
+}
+
+/// Advice rather than authority: these do not fail a round.
+fn add_warnings(l: &GoalLoop, v: &mut Verdict) {
     // One gap does not mean one file, but it does mean one causal claim.
     let limit = l
         .config
@@ -359,6 +380,43 @@ pub fn check(l: &GoalLoop, round_dir: &Path) -> Res<Verdict> {
                 .into(),
         );
     }
+}
+
+pub fn check(l: &GoalLoop, round_dir: &Path) -> Res<Verdict> {
+    let snap_path = round_dir.join("snapshot.json");
+    let raw = fs::read_to_string(&snap_path).map_err(|_| {
+        LoopError(format!(
+            "{} missing — was the round opened?",
+            snap_path.display()
+        ))
+    })?;
+    let snap: Value = serde_json::from_str(&raw).map_err(|e| LoopError(e.to_string()))?;
+    let old_hashes = snap.get("hashes").cloned().unwrap_or(Value::Null);
+    let a = Authority::from_snapshot(&snap, l);
+
+    let mut v = Verdict {
+        violations: vec![],
+        proposals: vec![],
+        warnings: vec![],
+        changed_free: vec![],
+        appended_measures: vec![],
+    };
+
+    let mut seen: Vec<String> = Vec::new();
+    for (rel, path) in guarded_files(l, &a.frozen, &a.measure) {
+        let digest = sha256_file(&path)?;
+        let was = old_hashes.get(&rel).and_then(|h| h.as_str());
+        v.record(judge_present(&a, &rel, &path, round_dir, was, &digest));
+        seen.push(rel);
+    }
+
+    if let Some(map) = old_hashes.as_object() {
+        for rel in map.keys().filter(|r| !seen.iter().any(|s| &s == r)) {
+            v.record(judge_absent(&a, l, rel));
+        }
+    }
+
+    add_warnings(l, &mut v);
     Ok(v)
 }
 
