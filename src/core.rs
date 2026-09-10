@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -309,10 +310,17 @@ pub fn run_within(
         }
     };
 
+    // Drain over channels rather than by joining. After a timeout the process
+    // tree may still hold the write end of a pipe, and a join would block until
+    // it closes — turning a kill that fired on time into a wait that did not.
+    // Reading with a deadline means a survivor costs us its output, not the
+    // whole point of having a timeout.
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
-    let out_h = thread::spawn(move || drain(&mut out_pipe));
-    let err_h = thread::spawn(move || drain(&mut err_pipe));
+    let (out_tx, out_rx) = mpsc::channel();
+    let (err_tx, err_rx) = mpsc::channel();
+    thread::spawn(move || out_tx.send(drain(&mut out_pipe)));
+    thread::spawn(move || err_tx.send(drain(&mut err_pipe)));
 
     let mut timed_out = false;
     let code = loop {
@@ -333,8 +341,11 @@ pub fn run_within(
         thread::sleep(Duration::from_millis(50));
     };
 
-    let out = out_h.join().unwrap_or_default();
-    let mut err = err_h.join().unwrap_or_default();
+    // A clean exit closes the pipes at once, so this returns immediately; only
+    // a killed-but-surviving grandchild ever waits out the grace period.
+    let grace = Duration::from_millis(if timed_out { 500 } else { 30_000 });
+    let out = out_rx.recv_timeout(grace).unwrap_or_default();
+    let mut err = err_rx.recv_timeout(grace).unwrap_or_default();
     if timed_out {
         let secs = limit.map(|l| l.as_secs()).unwrap_or(0);
         err.push_str(&format!(
@@ -357,8 +368,14 @@ pub fn run_within(
 /// group leader, so the group id is the child's pid.
 #[cfg(unix)]
 fn kill_group(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{pid}")])
+    // Through `sh` so the negative pid is parsed as a process group by the
+    // shell's own builtin, rather than depending on which `kill` binary is on
+    // PATH and how it reads a leading dash.
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "kill -KILL -{pid} 2>/dev/null || kill -KILL {pid} 2>/dev/null"
+        ))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
