@@ -207,3 +207,69 @@ mod aborting {
         assert_has(&out, "no open round");
     }
 }
+
+mod timeouts {
+    //! A command that hangs is indistinguishable from one that is slow until
+    //! something kills it. This is the round that cost real time before it
+    //! existed: an unmodified SDK looping forever on a paging bug produced no
+    //! output at all, and otogo waited.
+    use super::*;
+
+    #[test]
+    fn a_hanging_driver_is_killed_and_reported_as_a_timeout() {
+        let r = Repo::new();
+        r.set_command("drive", "sleep 30");
+        r.set_config("/timeouts/drive", serde_json::json!(1));
+        r.open_round();
+
+        let start = std::time::Instant::now();
+        let (_, out) = r.run(&["drive"]);
+        assert!(
+            start.elapsed().as_secs() < 15,
+            "otogo waited instead of killing"
+        );
+        assert_has(&out, "TIMED OUT");
+        assert_has(&out, "raise `timeouts.drive`");
+    }
+
+    #[test]
+    fn the_timeout_is_recorded_in_the_evidence() {
+        let r = Repo::new();
+        r.set_command("drive", "sleep 30");
+        r.set_config("/timeouts/drive", serde_json::json!(1));
+        r.open_round();
+        r.run(&["drive"]);
+
+        let ev = r.json("goals/rounds/001/drive.json");
+        assert_eq!(ev["timed_out"], true);
+        assert_eq!(ev["exit"], 124, "should use timeout(1)'s conventional code");
+        assert!(
+            ev["stderr"]
+                .as_str()
+                .unwrap_or("")
+                .contains("killed after 1s"),
+            "the log should say why: {ev}"
+        );
+    }
+
+    #[test]
+    fn a_hanging_floor_is_red_not_a_wait() {
+        let r = Repo::new();
+        r.set_command("floor", "sleep 30");
+        r.set_config("/timeouts/floor", serde_json::json!(1));
+        let (code, out) = r.run(&["floor"]);
+        assert_eq!(code, 1);
+        assert_has(&out, "floor TIMED OUT");
+    }
+
+    #[test]
+    fn zero_means_no_limit() {
+        let r = Repo::new();
+        r.set_command("drive", "true");
+        r.set_config("/timeouts/default", serde_json::json!(0));
+        r.open_round();
+        let (code, out) = r.run(&["drive"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(!out.contains("TIMED OUT"));
+    }
+}

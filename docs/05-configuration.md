@@ -57,6 +57,35 @@ OTOGO_ROUND     the round directory
 OTOGO_PHASE     "drive" or "verify"
 ```
 
+## Timeouts
+
+```json
+"timeouts": { "default": 1800, "drive": 600, "reset": 900 }
+```
+
+Every command runs under a budget and is killed if it outruns it, reported as
+`TIMED OUT` rather than a generic non-zero exit. `0` means no limit.
+
+This is not tidiness. A command that hangs produces no output and looks exactly
+like one that is slow — a driver caught in an infinite retry or paging loop will
+sit there indefinitely while the loop waits on it. Set `drive` tighter than the
+rest: a driver should finish in the time a user would wait.
+
+## What counts as a change
+
+In a git repository, **git decides** which files the guard considers: its own
+list of tracked and non-ignored files. Build output and fixture data are not
+product changes, and hashing them makes every round report them as changed,
+which buries the real diff.
+
+Two consequences worth knowing:
+
+- **A path that is frozen or a measure is guarded even when git ignores it.**
+  Fixtures are routinely gitignored because they are large. Un-freezing the exam
+  because of a line in `.gitignore` would defeat the authority model.
+- **A tracked `build/` or `target/` directory is ordinary source.** Only the
+  non-git fallback skips directories by name.
+
 ## The corpus
 
 Three requests to start. Each is **one real thing a person actually asks the

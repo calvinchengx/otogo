@@ -122,6 +122,46 @@ impl Repo {
         self.json("goals/STATE.json")
     }
 
+    /// Make this a real git repo with a .gitignore, so the guard's
+    /// ignore-awareness can be exercised.
+    pub fn git_init(&self, ignore: &str) {
+        self.write(".gitignore", ignore);
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@example.com"],
+            vec!["config", "user.name", "t"],
+            vec!["add", "-A"],
+            vec!["-c", "commit.gpgsign=false", "commit", "-qm", "init"],
+        ] {
+            let ok = Command::new("git")
+                .args(&args)
+                .current_dir(&self.root)
+                .output()
+                .expect("git");
+            assert!(
+                ok.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&ok.stderr)
+            );
+        }
+    }
+
+    /// Set a value in loop.json by JSON pointer, e.g. "/timeouts/drive".
+    pub fn set_config(&self, pointer: &str, value: serde_json::Value) {
+        let mut cfg = self.json("goals/loop.json");
+        let mut cur = &mut cfg;
+        let parts: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
+        for k in &parts[..parts.len() - 1] {
+            if cur.get(*k).is_none() {
+                cur[*k] = serde_json::json!({});
+            }
+            cur = cur.get_mut(*k).unwrap();
+        }
+        cur[parts[parts.len() - 1]] = value;
+        self.write_json("goals/loop.json", &cfg);
+    }
+
     pub fn set_command(&self, key: &str, value: &str) {
         let mut cfg = self.json("goals/loop.json");
         cfg["commands"][key] = serde_json::json!(value);

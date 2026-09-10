@@ -14,8 +14,55 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::core::{pretty, sha256_file, walk_repo, GoalLoop, LoopError, Res};
+use crate::core::{git_visible, pretty, sha256_file, walk_repo, GoalLoop, LoopError, Res};
 use crate::glob::GlobSet;
+
+/// The files a round is judged on.
+///
+/// Build output and fixture data are not product changes, and hashing them
+/// makes every round report them as changed — which buries the real diff and
+/// fires the attribution warning on noise.
+///
+/// When this is a git repository, **git decides**: its list is the set of
+/// files, rather than a filter over a hand-rolled walk. That is deliberate. A
+/// walk with a hardcoded skip list gets it wrong in both directions — it hides
+/// a repo whose product genuinely lives in `build/` or `target/`, which would
+/// silently unguard frozen files there, and it cannot know about nested
+/// .gitignore files or the user's global excludes.
+///
+/// The exception matters more than the rule: a path that is FROZEN or a
+/// MEASURE is guarded even when git ignores it. Fixtures are routinely
+/// gitignored because they are large, and un-freezing the exam because of a
+/// line in .gitignore would defeat the entire authority model.
+///
+/// Without git, everything the walk reaches is guarded — the safe direction to
+/// fail, at the cost of skipping the conventional build directories.
+fn guarded_files(
+    l: &GoalLoop,
+    frozen: &GlobSet,
+    measure: &GlobSet,
+) -> Vec<(String, std::path::PathBuf)> {
+    let visible = match git_visible(&l.root) {
+        None => return walk_repo(&l.root),
+        Some(v) => v,
+    };
+    let mut out: Vec<(String, std::path::PathBuf)> = visible
+        .iter()
+        .filter(|rel| !rel.starts_with("goals/rounds/") && !crate::core::is_bookkeeping(rel))
+        .map(|rel| (rel.clone(), l.root.join(rel)))
+        .filter(|(_, p)| p.is_file())
+        .collect();
+
+    // Ignored, but part of the exam: pick these up from the walk.
+    let have: std::collections::HashSet<String> = out.iter().map(|(r, _)| r.clone()).collect();
+    for (rel, path) in walk_repo(&l.root) {
+        if !have.contains(&rel) && (frozen.is_match(&rel) || measure.is_match(&rel)) {
+            out.push((rel, path));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
 
 pub struct Verdict {
     pub violations: Vec<String>,
@@ -47,12 +94,12 @@ impl Verdict {
 /// by rules the round itself edited — a loop that can empty its own `frozen`
 /// list has no authority model at all.
 pub fn take_snapshot(l: &GoalLoop, round_dir: &Path) -> Res<usize> {
-    let measure = l.measure();
+    let (frozen, measure) = (l.frozen(), l.measure());
     let mut hashes = BTreeMap::new();
     let mut measure_files = Vec::new();
     let copy_root = round_dir.join("_snapshot");
 
-    for (rel, path) in walk_repo(&l.root) {
+    for (rel, path) in guarded_files(l, &frozen, &measure) {
         hashes.insert(rel.clone(), sha256_file(&path)?);
         if measure.is_match(&rel) {
             measure_files.push(rel.clone());
@@ -178,7 +225,7 @@ pub fn check(l: &GoalLoop, round_dir: &Path) -> Res<Verdict> {
     };
     let mut seen: Vec<String> = Vec::new();
 
-    for (rel, path) in walk_repo(&l.root) {
+    for (rel, path) in guarded_files(l, &frozen, &measure) {
         seen.push(rel.clone());
         let digest = sha256_file(&path)?;
         let was = old_hashes.get(&rel).and_then(|h| h.as_str());
@@ -262,6 +309,12 @@ pub fn check(l: &GoalLoop, round_dir: &Path) -> Res<Verdict> {
     if let Some(map) = old_hashes.as_object() {
         for rel in map.keys() {
             if seen.iter().any(|s| s == rel) {
+                continue;
+            }
+            // Still on disk, just no longer guarded — someone gitignored it
+            // mid-round. That is not a deletion, and reporting it as one would
+            // be a false alarm the operator cannot act on.
+            if l.root.join(rel).exists() {
                 continue;
             }
             if frozen.is_match(rel) {

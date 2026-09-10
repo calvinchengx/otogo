@@ -15,7 +15,7 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
 use crate::core::{
-    default_config, err, now, pretty, run, truncate, GoalLoop, LoopError, Res, Run,
+    default_config, err, now, pretty, run_within, truncate, GoalLoop, LoopError, Res, Run,
     ESCALATE_LAYERS, LAYERS,
 };
 use crate::{guard, templates};
@@ -314,9 +314,17 @@ fn preflight(l: &GoalLoop, round_dir: &Path) -> String {
         return "unchecked".into();
     }
     if !reset.is_empty() {
-        let r = run(&reset, &l.root, &[]);
+        let r = run_within(&reset, &l.root, &[], l.timeout_for("reset"));
         record(round_dir, "reset", &r);
         if !r.ok() {
+            if r.timed_out {
+                bad(&format!(
+                    "reset TIMED OUT after {:.0}s — see {}/reset.log",
+                    r.seconds,
+                    round_dir.file_name().unwrap_or_default().to_string_lossy()
+                ));
+                return "unhealthy".into();
+            }
             bad(&format!(
                 "reset failed (exit {}) — see {}/reset.log",
                 r.code,
@@ -326,9 +334,13 @@ fn preflight(l: &GoalLoop, round_dir: &Path) -> String {
         }
         ok("fixture restored");
     }
-    let r = run(&health, &l.root, &[]);
+    let r = run_within(&health, &l.root, &[], l.timeout_for("health"));
     record(round_dir, "health", &r);
     if !r.ok() {
+        if r.timed_out {
+            bad(&format!("health check TIMED OUT after {:.0}s", r.seconds));
+            return "unhealthy".into();
+        }
         bad(&format!(
             "world unhealthy (exit {}) — see {}/health.log",
             r.code,
@@ -362,11 +374,18 @@ fn floor(l: &GoalLoop, round_dir: &Path) -> String {
         warn("no floor command configured — nothing preserves prior progress.");
         return "unconfigured".into();
     }
-    let r = run(&floor, &l.root, &[]);
+    let r = run_within(&floor, &l.root, &[], l.timeout_for("floor"));
     record(round_dir, "floor", &r);
     if r.ok() {
         ok("floor green");
         "green".into()
+    } else if r.timed_out {
+        bad(&format!(
+            "floor TIMED OUT after {:.0}s — see {}/floor.log",
+            r.seconds,
+            round_dir.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        "red".into()
     } else {
         bad(&format!(
             "floor RED (exit {}) — see {}/floor.log",
@@ -570,7 +589,7 @@ fn cmd_drive(verify: bool) -> Res<i32> {
             ("round_dir", &r_),
         ],
     );
-    let res = run(
+    let res = run_within(
         &cmd,
         &l.root,
         &[
@@ -579,17 +598,27 @@ fn cmd_drive(verify: bool) -> Res<i32> {
             ("OTOGO_ROUND", r_),
             ("OTOGO_PHASE", label.to_string()),
         ],
+        l.timeout_for("drive"),
     );
     record(&rd, label, &res);
-    let msg = format!(
-        "driver exit {} — evidence in {}/{label}/",
-        res.code,
-        rd.file_name().unwrap_or_default().to_string_lossy()
-    );
-    if res.ok() {
-        ok(&msg)
+    if res.timed_out {
+        bad(&format!(
+            "driver TIMED OUT after {:.0}s — it was killed, not waited on. A driver that \
+             hangs looks exactly like one that is slow; raise `timeouts.drive` if this run \
+             was genuinely long.",
+            res.seconds
+        ));
     } else {
-        bad(&msg)
+        let msg = format!(
+            "driver exit {} — evidence in {}/{label}/",
+            res.code,
+            rd.file_name().unwrap_or_default().to_string_lossy()
+        );
+        if res.ok() {
+            ok(&msg)
+        } else {
+            bad(&msg)
+        }
     }
     note("record: answer, tool calls, rejected actions, visible result, persistent effects");
     set_phase(&mut l, label)?;
@@ -617,10 +646,11 @@ fn cmd_score(verify: bool) -> Res<i32> {
         &score,
         &[("round_dir", &r_), ("out", &r_), ("phase", phase)],
     );
-    let res = run(
+    let res = run_within(
         &cmd,
         &l.root,
         &[("OTOGO_ROUND", r_), ("OTOGO_PHASE", phase.to_string())],
+        l.timeout_for("score"),
     );
     record(&rd, label, &res);
     let msg = format!("scorer exit {}", res.code);

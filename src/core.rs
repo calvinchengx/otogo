@@ -3,8 +3,9 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -70,7 +71,12 @@ pub fn default_config() -> Value {
             "free": ["**"]
         },
         "measure": { "globs": ["tests/**"], "append_only": true, "json_ledgers": [] },
-        "budget": { "rounds_per_batch": 3, "attribution_warn_areas": 3 }
+        "budget": { "rounds_per_batch": 3, "attribution_warn_areas": 3 },
+        // Per-command budgets. `default` covers anything not named. A command
+        // that outruns its budget is killed and reported as a timeout rather
+        // than waited on: an infinite loop in a driver produces no output, so
+        // nothing else distinguishes it from slow work.
+        "timeouts": { "default": 1800 }
     })
 }
 
@@ -136,11 +142,40 @@ pub fn sha256_file(path: &Path) -> Res<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn bookkeeping(rel: &str) -> bool {
+pub fn is_bookkeeping(rel: &str) -> bool {
     // Rewritten every round by the tool itself; never a product change.
     matches!(
         rel,
         "goals/STATE.json" | "goals/STATE.md" | "goals/proposals.md"
+    )
+}
+
+/// Paths git would keep: tracked, plus untracked files that are not ignored.
+///
+/// Returns None when this is not a git repository, or git is unavailable — the
+/// caller then guards everything, which is the safe direction to fail.
+pub fn git_visible(root: &Path) -> Option<std::collections::HashSet<String>> {
+    let out = Command::new("git")
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
     )
 }
 
@@ -171,7 +206,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
                 Err(_) => continue,
             };
             // rounds/ is the loop's own evidence log; never guarded.
-            if rel.starts_with(&format!("{GOALS}/rounds/")) || bookkeeping(&rel) {
+            if rel.starts_with(&format!("{GOALS}/rounds/")) || is_bookkeeping(&rel) {
                 continue;
             }
             out.push((rel, path));
@@ -187,6 +222,10 @@ pub struct Run {
     pub out: String,
     pub err: String,
     pub seconds: f64,
+    /// The command was killed for exceeding its budget. Worth its own flag: a
+    /// hanging command is indistinguishable from a slow one until something
+    /// says so, and a driver that loops forever produces no output to read.
+    pub timed_out: bool,
 }
 
 impl Run {
@@ -199,6 +238,7 @@ impl Run {
             "cmd": self.cmd,
             "exit": self.code,
             "seconds": (self.seconds * 100.0).round() / 100.0,
+            "timed_out": self.timed_out,
             "stdout": tail(&self.out, 20_000),
             "stderr": tail(&self.err, 20_000),
         })
@@ -213,28 +253,100 @@ fn tail(s: &str, n: usize) -> String {
     }
 }
 
+/// Conventional exit code for "killed after a timeout", as `timeout(1)` uses.
+pub const EXIT_TIMEOUT: i32 = 124;
+
 pub fn run(cmd: &str, cwd: &Path, env_extra: &[(&str, String)]) -> Run {
+    run_within(cmd, cwd, env_extra, None)
+}
+
+/// Run a command, killing it if it outruns `limit`.
+///
+/// stdout and stderr are drained on their own threads. Without that, a command
+/// that fills a pipe buffer blocks on write while this side waits for it to
+/// exit — a deadlock that looks exactly like the hang the timeout exists to
+/// catch, which would be an unfortunate way to implement it.
+pub fn run_within(
+    cmd: &str,
+    cwd: &Path,
+    env_extra: &[(&str, String)],
+    limit: Option<Duration>,
+) -> Run {
     let t0 = SystemTime::now();
     let mut c = Command::new("sh");
-    c.arg("-c").arg(cmd).current_dir(cwd);
+    c.arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     for (k, v) in env_extra {
         c.env(k, v);
     }
-    let (code, out, error) = match c.output() {
-        Ok(o) => (
-            o.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&o.stdout).to_string(),
-            String::from_utf8_lossy(&o.stderr).to_string(),
-        ),
-        Err(e) => (127, String::new(), format!("{e}")),
+
+    let mut child = match c.spawn() {
+        Ok(ch) => ch,
+        Err(e) => {
+            return Run {
+                cmd: cmd.to_string(),
+                code: 127,
+                out: String::new(),
+                err: format!("{e}"),
+                seconds: 0.0,
+                timed_out: false,
+            }
+        }
     };
+
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_h = thread::spawn(move || drain(&mut out_pipe));
+    let err_h = thread::spawn(move || drain(&mut err_pipe));
+
+    let mut timed_out = false;
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code().unwrap_or(-1),
+            Ok(None) => {}
+            Err(_) => break -1,
+        }
+        if let Some(limit) = limit {
+            if t0.elapsed().map(|d| d > limit).unwrap_or(false) {
+                let _ = child.kill();
+                let _ = child.wait();
+                timed_out = true;
+                break EXIT_TIMEOUT;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+
+    let out = out_h.join().unwrap_or_default();
+    let mut err = err_h.join().unwrap_or_default();
+    if timed_out {
+        let secs = limit.map(|l| l.as_secs()).unwrap_or(0);
+        err.push_str(&format!(
+            "\n[otogo] killed after {secs}s: the command exceeded its budget. \
+             A command that hangs looks exactly like one that is slow.\n"
+        ));
+    }
+
     Run {
         cmd: cmd.to_string(),
         code,
         out,
-        err: error,
+        err,
         seconds: t0.elapsed().map(|d| d.as_secs_f64()).unwrap_or(0.0),
+        timed_out,
     }
+}
+
+fn drain(pipe: &mut Option<impl Read>) -> String {
+    let mut buf = String::new();
+    if let Some(p) = pipe {
+        let _ = p.read_to_string(&mut buf);
+    }
+    buf
 }
 
 // ------------------------------------------------------------------ loop
@@ -322,6 +434,26 @@ impl GoalLoop {
     }
     pub fn measure(&self) -> GlobSet {
         GlobSet::from_json(self.config.pointer("/measure/globs"))
+    }
+
+    /// The budget for one command, in seconds. `timeouts.<name>` wins over
+    /// `timeouts.default`; 0 means no limit.
+    pub fn timeout_for(&self, name: &str) -> Option<Duration> {
+        let secs = self
+            .config
+            .pointer(&format!("/timeouts/{name}"))
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                self.config
+                    .pointer("/timeouts/default")
+                    .and_then(|v| v.as_u64())
+            })
+            .unwrap_or(1800);
+        if secs == 0 {
+            None
+        } else {
+            Some(Duration::from_secs(secs))
+        }
     }
 
     pub fn budget(&self) -> u64 {
