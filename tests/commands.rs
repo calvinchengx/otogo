@@ -218,7 +218,10 @@ mod timeouts {
     #[test]
     fn a_hanging_driver_is_killed_and_reported_as_a_timeout() {
         let r = Repo::new();
-        r.set_command("drive", "sleep 30");
+        // A grandchild holding the pipe, not a simple `sleep`. Killing only the
+        // shell leaves it alive and draining blocks until it finishes anyway —
+        // which is how this passed on macOS and hung for the full 30s on Linux.
+        r.set_command("drive", "sh -c 'sleep 30 & wait'");
         r.set_config("/timeouts/drive", serde_json::json!(1));
         r.open_round();
 

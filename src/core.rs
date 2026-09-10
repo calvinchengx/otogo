@@ -284,6 +284,17 @@ pub fn run_within(
         c.env(k, v);
     }
 
+    // Put the command in its own process group so a timeout can kill the whole
+    // tree. `sh -c "sleep 30"` may leave `sleep` as a GRANDCHILD: killing only
+    // the shell leaves it holding the stdout pipe, and draining then blocks
+    // until it exits on its own — the kill fires on time and the wait happens
+    // anyway, which is the bug this whole feature exists to prevent.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        c.process_group(0);
+    }
+
     let mut child = match c.spawn() {
         Ok(ch) => ch,
         Err(e) => {
@@ -312,6 +323,7 @@ pub fn run_within(
         }
         if let Some(limit) = limit {
             if t0.elapsed().map(|d| d > limit).unwrap_or(false) {
+                kill_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 timed_out = true;
@@ -340,6 +352,20 @@ pub fn run_within(
         timed_out,
     }
 }
+
+/// Kill the whole process group. `process_group(0)` made the child its own
+/// group leader, so the group id is the child's pid.
+#[cfg(unix)]
+fn kill_group(pid: u32) {
+    let _ = Command::new("kill")
+        .args(["-KILL", &format!("-{pid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(unix))]
+fn kill_group(_pid: u32) {}
 
 fn drain(pipe: &mut Option<impl Read>) -> String {
     let mut buf = String::new();
