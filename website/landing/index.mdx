@@ -1,0 +1,46 @@
+---
+title: otogo
+description: Goal loops where the agent owns the turns and a person owns the rounds.
+template: splash
+hero:
+  tagline: |
+    Goal loops where the agent owns the turns and a person owns the rounds.
+    Every claim names its witnesses — the loop can add evidence, never rewrite it.
+  actions:
+    - text: Quickstart
+      link: /otogo/01-quickstart/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/calvinchengx/otogo
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="The loop cannot grade its own repair" icon="approve-check">
+    The corpus, fixture, rubric, score rules and `loop.json` are hashed when a
+    round opens. Touch one and the round cannot close. The authority in force is
+    captured at `open`, so a loop that empties its own frozen list is still
+    judged by the rules it started under.
+  </Card>
+  <Card title="Claims carry witnesses" icon="document">
+    Evidence ledgers are append-only and compared structurally, not by line
+    diff. A round may add a witness or a claim. It may not drop one, repoint one
+    at an easier test, or soften a claim's text — all of which read as
+    improvements in a diff.
+  </Card>
+  <Card title="An unhealthy world scores nothing" icon="warning">
+    `reset` then `health` run before anything else. If the world does not match
+    the recorded run, the round is dropped as NO_SCORE rather than recorded as a
+    failure. Missing data looks like weak reasoning; stale code looks like a
+    broken contract.
+  </Card>
+  <Card title="Three loops, three deciders" icon="seti:clock">
+    The product loop closes one capability per round, decided by evidence. The
+    harness loop changes on repeated friction. The direction loop — continue,
+    redirect, or stop — belongs to a person, because a score cannot decide a
+    product's direction.
+  </Card>
+</CardGrid>

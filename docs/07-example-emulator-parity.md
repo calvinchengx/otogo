@@ -1,4 +1,4 @@
-# Worked example: growing emulator parity
+# Example: growing emulator parity
 
 Anchored on `azure-keyvault-emulator`, but every sibling emulator in the
 workspace has the same shape.
@@ -145,3 +145,8 @@ round refuses to close and that regression becomes the next job.
 Three rounds, then it stops and waits for you. It also stops early on any of the
 essay's stop rules: unhealthy world, a `world` or `harness` classification, an
 authority violation, or a floor that went red.
+
+## Files
+
+The runnable pieces live in [`examples/emulator-parity/`](../examples/emulator-parity/):
+`loop.json`, `drive.sh`, `score.py`, and a corpus request.

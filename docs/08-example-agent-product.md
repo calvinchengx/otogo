@@ -1,4 +1,4 @@
-# When the product has an agent inside it
+# Example: when the product has an agent inside it
 
 `data-agent-service`, `data-agent-formulator` and `data-agent-voice` are this
 shape. It is the case with the sharpest failure mode, and the harness's most

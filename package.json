@@ -1,0 +1,12 @@
+{
+  "name": "otogo-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "engines": { "node": ">=22", "pnpm": ">=10" },
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "docs:dev": "pnpm --filter otogo-docs dev",
+    "docs:build": "pnpm --filter otogo-docs build",
+    "docs:preview": "pnpm --filter otogo-docs preview"
+  }
+}

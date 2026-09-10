@@ -1,0 +1,56 @@
+name: Docs site
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', 'website/**', 'examples/**', 'package.json',
+            'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.github/workflows/docs-site.yml']
+  # Pull requests build the site as a check. The sync script rewrites
+  # repo-relative links and warns when one points at nothing, so a PR that
+  # moves a file should fail here rather than after merge.
+  pull_request:
+    paths: ['docs/**', 'website/**', 'examples/**', 'package.json',
+            'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.github/workflows/docs-site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time, newest wins. PR builds get their own group per ref:
+# GitHub keeps at most one pending run per group, so sharing a group with
+# deploys lets a stream of PR builds cancel the queued main-branch publish
+# repeatedly, with nothing anywhere reporting an error.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'docs-deploy' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # Must match `base` in website/astro.config.mjs.
+          path: website/dist
+
+  deploy:
+    # Build-only on pull requests; publishing happens from main.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -64,108 +64,23 @@ opened, never by the rules it left behind.
 Deterministic checks are append-only. A round may add a rung for a failure it
 observed. It may never weaken one or lower a threshold.
 
-## The round
+## Documentation
 
-```bash
-otogo open sdk-python-secret-roundtrip   # reset, health, floor, snapshot the exam
-otogo drive                              # one approved request, fresh interaction
-otogo score                              # read what happened
-otogo classify --layer domain --gap "set returns the envelope but never writes"
-#   ... close that whole path, then add a rung ...
-otogo verify                             # health + floor + authority + the same request
-otogo close --outcome improved
-```
+Full docs: **<https://calvinchengx.github.io/otogo/>** — or read the Markdown
+in [`docs/`](docs/), which is the source those pages are built from.
 
-`classify` takes one of seven layers — `world domain contract runtime steering
-surface harness`. Without it, every agent failure becomes a prompt problem and
-every visual failure a frontend problem: the loop changes the nearest thing
-instead of the right thing. Two layers are not product rounds and stop the round
-immediately — `world` (fix the world, reopen) and `harness` (the harness is the
-failure).
-
-It writes a `gap.md` with the path the claim must close end to end:
-
-```
-request → representation → operation → persistent effect → visible proof
-```
-
-Partial paths are the most convincing failures there are: the screen that
-renders and stores nothing, the tool that returns success while state stays put,
-the page that looks complete and answers nothing.
-
-## Three loops at three speeds
-
-| loop | closes | decided by |
-|---|---|---|
-| product | one capability per round | the evidence |
-| harness | one development failure | repeated evidence — `otogo friction` |
-| direction | continue, redirect, or stop | a person — `otogo batch` |
-
-`friction` counts. One occurrence prints *"first occurrence is evidence, not a
-rule."* Two or more surfaces in `status` as earning a change to the driver,
-facts, or procedure. The loop does not rewrite its operating system after every
-surprise, and sometimes the right change is subtraction.
-
-## The repository is the control plane
-
-Sessions end and context compresses. `otogo init` scaffolds the package that
-makes sessions disposable without making the work forgetful:
-
-```
-goals/
-  goal.md       objective, exclusions, completion condition
-  facts.md      decisions later rounds must not rediscover
-  plan.md       initial floor, expected capability order
-  LOOP.md       procedure, authority, budget, stop rules
-  rubric.md     how a run is judged                        (frozen)
-  STATE.md      the queue, failures, next action
-  corpus/       approved requests                          (frozen)
-  rounds/NNN/   request, transcript, effects, scores, gap.md, guard.json
-  proposals.md  boundary changes awaiting a person
-```
-
-`otogo brief` prints the packet a fresh agent session reads instead of the
-conversation it doesn't have — goal, procedure, facts, state, current request,
-current gap, and exactly which paths are frozen, propose-level, and append-only.
-
-## Beyond feature work
-
-The five commands in `loop.json` are domain-specific. Everything above them is
-not:
-
-| software | general |
+| | |
 |---|---|
-| fixture | the starting conditions you can restore |
-| health check | is the world in a state where a result would mean anything |
-| floor | what must not get worse |
-| corpus | real demand, written by a person, sent unchanged |
-| witness | what vouches for this claim |
-| round | one gap, one causal claim |
-
-Recurring day-to-day work fits this shape more naturally than feature work
-does, because **the corpus arrives on its own**. The triage queue, the weekly
-report, the review pass, the runbook you execute every deploy — these are real
-demand, written by other people, already approved by the fact that someone asked
-for them. You do not have to invent representative requests; you have to pick
-three and stop editing them.
-
-The failure mode is the same one, wearing different clothes. A task agent that
-*describes* the right action without performing it looks exactly like an
-emulator that answers without storing. The report gets written and the number in
-it was never recomputed. The ticket gets a comment and no field changes. So the
-driver still has to read the effect from the system underneath, never from what
-the agent said it did.
-
-What day-to-day work adds is a floor that is easy to lose. Quality drifts
-silently on recurring tasks — nobody notices the digest got vaguer, or the
-review stopped checking the thing it used to check. That is precisely what a
-rung is for: the round that first catches it writes down the check, and no
-later round can quietly remove it.
-
-Where it does **not** earn its cost: one-off tasks. If the work happens once,
-there is no second round to preserve anything for, and the harness is pure
-overhead. Use it when the task recurs, the output has an effect you can observe,
-and the quality is the kind that erodes without anyone deciding to erode it.
+| [Quickstart](docs/01-quickstart.md) | install, scaffold, run one round |
+| [The round](docs/02-the-round.md) | the eight steps, the seven layers, the stop rules |
+| [Authority](docs/03-authority.md) | frozen / propose / free, append-only rungs, evidence ledgers |
+| [Witnesses](docs/04-witnesses.md) | why a claim names what vouches for it |
+| [Configuration](docs/05-configuration.md) | the five commands, the corpus, the control plane |
+| [Skills](docs/06-skills.md) | the CLI enforces, the skills teach |
+| [Emulator parity](docs/07-example-emulator-parity.md) | a worked example against a real SDK |
+| [Agent products](docs/08-example-agent-product.md) | when the product has an agent inside it |
+| [Beyond feature work](docs/09-beyond-feature-work.md) | recurring day-to-day tasks |
+| [How otogo is tested](docs/10-testing.md) | 58 tests, 88.6% line coverage |
 
 ## Install
 

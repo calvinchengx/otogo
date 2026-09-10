@@ -5,3 +5,10 @@ Cargo.lock.bak
 # A loop's own evidence is repo state, not build output — do NOT ignore goals/.
 # The one exception is scratch output from local experiments:
 /scratch/
+
+# Docs site
+node_modules/
+website/dist/
+website/src/content/docs/
+_site/
+website/.astro/

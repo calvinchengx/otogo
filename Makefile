@@ -1,4 +1,4 @@
-.PHONY: help build install install-skills test coverage fmt lint smoke clean
+.PHONY: help build install install-skills test coverage fmt lint smoke docs-build docs-serve clean
 
 help: ## Show the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -35,10 +35,16 @@ fmt: ## Format
 lint: ## Clippy, warnings as errors
 	cargo clippy --all-targets -- -D warnings
 
+docs-build: ## Build the published docs site into website/dist
+	pnpm install --silent && pnpm docs:build
+
+docs-serve: ## Serve the docs locally with live reload
+	pnpm install --silent && pnpm docs:dev
+
 smoke: ## Scaffold a throwaway loop and open a round against it
 	@rm -rf scratch/smoke && mkdir -p scratch/smoke
 	@cd scratch/smoke && $(CURDIR)/target/release/otogo init . && $(CURDIR)/target/release/otogo status
 
 clean: ## Remove build and test artifacts
 	cargo clean
-	rm -rf scratch
+	rm -rf scratch website/dist website/src/content/docs

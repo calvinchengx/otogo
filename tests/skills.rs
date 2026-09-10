@@ -188,3 +188,32 @@ fn the_runner_feeds_the_skill_rather_than_a_copy_of_it() {
         "examples/AGENT.md is a second copy of the round procedure; the skill is the one"
     );
 }
+
+#[test]
+fn every_doc_chapter_is_in_the_sidebar() {
+    // A chapter written but never listed is a chapter nobody reads. Starlight
+    // fails the build on a sidebar slug with no file; this is the other
+    // direction — a file with no sidebar entry.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let config = std::fs::read_to_string(root.join("website/astro.config.mjs"))
+        .expect("website/astro.config.mjs missing");
+    let mut missing = Vec::new();
+    for entry in std::fs::read_dir(root.join("docs"))
+        .expect("docs/ missing")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(slug) = name.strip_suffix(".md") {
+            if slug.chars().take(2).all(|c| c.is_ascii_digit())
+                && !config.contains(&format!("'{slug}'"))
+            {
+                missing.push(slug.to_string());
+            }
+        }
+    }
+    missing.sort();
+    assert!(
+        missing.is_empty(),
+        "docs not listed in the sidebar: {missing:?}"
+    );
+}
