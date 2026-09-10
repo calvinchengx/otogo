@@ -1,4 +1,4 @@
-.PHONY: help build install install-skills test fmt lint smoke clean
+.PHONY: help build install install-skills test coverage fmt lint smoke clean
 
 help: ## Show the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -22,6 +22,12 @@ install-skills: ## Link the otogo skills into a project's .claude/skills (DEST=p
 
 test: ## Run the test suite
 	cargo test
+
+coverage: ## Line coverage (cargo install cargo-llvm-cov)
+	cargo llvm-cov --summary-only
+
+coverage-html: ## Line coverage as a browsable report
+	cargo llvm-cov --html --open
 
 fmt: ## Format
 	cargo fmt
